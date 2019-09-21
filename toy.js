@@ -1,5 +1,7 @@
 import {
-    $
+    $,
+    append,
+    emptyElement
 } from './common.js'
 
 const STATE = {
@@ -8,7 +10,7 @@ const STATE = {
     failed: "failed"
 }
 
-const LOCATION_DELTA = 1;
+const LOCATION_DELTA = 10;
 const ANGLE_DELTA = 0.01;
 const TAU = Math.PI * 2;
 
@@ -26,6 +28,10 @@ function headingTo(p1, p2) {
         return t + TAU;
     }
     return t;
+}
+
+function log(msg) {
+    append(emptyElement($("#log")), msg);
 }
 
 class Point {
@@ -122,16 +128,16 @@ class Board {
 
 class Action {}
 
-class TurnTo extends Action {
-    constructor(a) {
+class TurnToTarget extends Action {
+    constructor() {
         super();
-        this.target = a;
     }
 
     tick(actor) {
-        if (angleDeltaEqual(actor.heading, this.target)) {
+        const theta = headingTo(actor.location, actor.target);
+        if (angleDeltaEqual(actor.heading, theta)) {
             return STATE.success;
-        } else if (actor.heading < this.target) {
+        } else if (actor.heading < theta) {
             actor.heading += 0.01;
             if (actor.heading > TAU) {
                 actor.heading -= TAU;
@@ -146,20 +152,31 @@ class TurnTo extends Action {
     }
 }
 
-class MoveTo extends Action {
-    constructor(p) {
+class MoveTowardsTarget extends Action {
+    constructor() {
         super();
-        this.target = p;
     }
 
     tick(actor) {
-        if (actor.location.equals(this.target)) {
+        if (actor.location.equals(actor.target)) {
             return STATE.success;
         } else {
             actor.location.x += Math.cos(actor.heading) * actor.speed;
             actor.location.y += Math.sin(actor.heading) * actor.speed;
             return STATE.running;
         }
+    }
+}
+
+class SetTarget extends Action {
+    constructor(t) {
+        super();
+        this.target;
+    }
+
+    tick(actor) {
+        actor.targt = this.target;
+        return STATE.success;
     }
 }
 
@@ -200,9 +217,6 @@ class Actor {
 
         this.size = 10;
 
-        const target = new Point(40, 70);
-
-        this.bt = new Sequence(new TurnTo(headingTo(this.location, target)), new MoveTo(target));
     }
 
     /**
@@ -226,11 +240,12 @@ class Actor {
     }
 
     tick(board) {
-        if (this.bt !== undefined) {
-            const s = this.bt.tick(this);
-            if (s !== STATE.running) {
-                delete this.bt;
-            }
+        if (this.bt === undefined) {
+            this.target = new Point(Math.floor(Math.random() * board.width), Math.floor(Math.random() * board.height));
+            this.bt = new Sequence(new TurnToTarget(), new MoveTowardsTarget())
+        }
+        if (this.bt.tick(this) !== STATE.running) {
+            delete this.bt;
         }
     }
 }
@@ -241,7 +256,12 @@ function init() {
     const b = new Board(canvas);
     b.resize();
 
-    b.add(new Actor(new Point(200, 200), Math.PI, 1));
+
+    for (let i = 0; i < 20; i += 1) {
+
+        b.add(new Actor(new Point(200, 200), Math.PI, 1));
+    }
+
 
     function tick() {
         window.requestAnimationFrame(tick);

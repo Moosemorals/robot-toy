@@ -1,3 +1,17 @@
 #c {
     border: 1px solid black;
 }
+
+#log {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 15em;
+    border: 1px solid black;
+    border-radius: 5px;
+    padding: 5px;
+    box-shadow: 5px 5px 0 black;
+    background: white;
+    color: black;
+    height: 2em;
+}
