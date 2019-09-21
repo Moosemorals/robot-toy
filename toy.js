@@ -2,6 +2,32 @@ import {
     $
 } from './common.js'
 
+const STATE = {
+    success: "success",
+    running: "running",
+    failed: "failed"
+}
+
+const LOCATION_DELTA = 1;
+const ANGLE_DELTA = 0.01;
+const TAU = Math.PI * 2;
+
+function locationDeltaEqual(a, b) {
+    return Math.abs(a - b) < LOCATION_DELTA;
+}
+
+function angleDeltaEqual(a, b) {
+    return Math.abs(a - b) < ANGLE_DELTA;
+}
+
+function headingTo(p1, p2) {
+    const t = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+    if (t < 0) {
+        return t + TAU;
+    }
+    return t;
+}
+
 class Point {
     /**
      *
@@ -18,7 +44,7 @@ class Point {
      * @param {Point} p
      */
     equals(p) {
-        return this.x === p.x && this.y === p.y;
+        return locationDeltaEqual(this.x, p.x) && locationDeltaEqual(this.y, p.y)
     }
 
     clamp(width, height) {
@@ -30,6 +56,10 @@ class Point {
             this.y += height;
         }
         this.y %= height;
+    }
+
+    dot(p) {
+
     }
 }
 
@@ -88,15 +118,91 @@ class Board {
             this.items[i].tick(this);
         }
     }
-
 }
 
-class Bug {
+class Action {}
+
+class TurnTo extends Action {
+    constructor(a) {
+        super();
+        this.target = a;
+    }
+
+    tick(actor) {
+        if (angleDeltaEqual(actor.heading, this.target)) {
+            return STATE.success;
+        } else if (actor.heading < this.target) {
+            actor.heading += 0.01;
+            if (actor.heading > TAU) {
+                actor.heading -= TAU;
+            }
+        } else {
+            actor.heading -= 0.01;
+            if (actor.heading < 0) {
+                actor.heading += TAU;
+            }
+        }
+        return STATE.running;
+    }
+}
+
+class MoveTo extends Action {
+    constructor(p) {
+        super();
+        this.target = p;
+    }
+
+    tick(actor) {
+        if (actor.location.equals(this.target)) {
+            return STATE.success;
+        } else {
+            actor.location.x += Math.cos(actor.heading) * actor.speed;
+            actor.location.y += Math.sin(actor.heading) * actor.speed;
+            return STATE.running;
+        }
+    }
+}
+
+class Sequence extends Action {
+    constructor(...a) {
+        super();
+        this.actions = a;
+        this.current = 0;
+    }
+
+    tick(actor) {
+        if (this.current >= this.actions.length) {
+            return STATE.success;
+        } else {
+            switch (this.actions[this.current].tick(actor)) {
+                case STATE.success:
+                    this.current += 1;
+                    if (this.current >= this.actions.length) {
+                        return STATE.success;
+                    }
+                    return STATE.running;
+                case STATE.failed:
+                    return STATE.failed;
+                case STATE.running:
+                    return STATE.running;
+            }
+        }
+    }
+}
+
+
+class Actor {
     constructor(p, h, s) {
         this.location = p;
-        this.size = 10;
         this.heading = h;
         this.speed = s;
+        this.scratch = {};
+
+        this.size = 10;
+
+        const target = new Point(40, 70);
+
+        this.bt = new Sequence(new TurnTo(headingTo(this.location, target)), new MoveTo(target));
     }
 
     /**
@@ -119,16 +225,12 @@ class Bug {
         g.restore();
     }
 
-    /**
-     * Update animation
-     */
     tick(board) {
-        this.location.x += Math.cos(this.heading) * this.speed;
-        this.location.y += Math.sin(this.heading) * this.speed;
-
-        if (this.location.x > board.width || this.location.y > board.height || this.location.x < 0 || this.location.y < 0) {
-            this.location.x = board.width / 2;
-            this.location.y = board.height / 2;
+        if (this.bt !== undefined) {
+            const s = this.bt.tick(this);
+            if (s !== STATE.running) {
+                delete this.bt;
+            }
         }
     }
 }
@@ -139,9 +241,7 @@ function init() {
     const b = new Board(canvas);
     b.resize();
 
-    for (let i = 0; i < 200; i += 1) {
-        b.add(new Bug(new Point(b.width / 2, b.height / 2), 2 * Math.PI * Math.random(), Math.random()));
-    }
+    b.add(new Actor(new Point(200, 200), Math.PI, 1));
 
     function tick() {
         window.requestAnimationFrame(tick);
