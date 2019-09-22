@@ -73,6 +73,10 @@ class Point {
         }
         this.y %= height;
     }
+
+    distance(p2) {
+        return Math.sqrt((this.x - p2.x) * (this.x - p2.x) + (this.y - p2.y) * (this.y - p2.y));
+    }
 }
 
 class Board {
@@ -132,6 +136,30 @@ class Board {
     }
 }
 
+class Target {
+    constructor(p) {
+        this.size = 10;
+        this.location = p;
+    }
+
+    draw(g) {
+        g.fillStyle = g.createRadialGradient(0, 0, 0, 0, 0, this.size);
+        g.fillStyle.addColorStop(0, 'blue');
+        g.fillStyle.addColorStop(1, 'white');
+        g.beginPath();
+        g.moveTo(0, -this.size);
+        g.lineTo(this.size, 0);
+        g.lineTo(0, this.size);
+        g.lineTo(-this.size, 0);
+        g.closePath();
+        g.fill();
+    }
+
+    tick(board) {
+        // does nothing
+    }
+}
+
 class Action {}
 
 class TurnToTarget extends Action {
@@ -141,12 +169,12 @@ class TurnToTarget extends Action {
 
     tick(actor) {
 
-        if (angleDeltaEqual(actor.heading, actor.targetHeading)) {
-            actor.heading = actor.targetHeading;
+        if (angleDeltaEqual(actor.heading, actor.stepHeading)) {
+            actor.heading = actor.stepHeading;
             return STATE.success;
         }
 
-        const angleDiff = ((actor.heading - actor.targetHeading % TAU) + TAU) % TAU;
+        const angleDiff = ((actor.heading - actor.stepHeading % TAU) + TAU) % TAU;
         if (angleDiff > TAU / 2) {
             actor.heading += ANGLE_DELTA;
         } else {
@@ -163,7 +191,7 @@ class MoveTowardsTarget extends Action {
     }
 
     tick(actor) {
-        if (actor.location.equals(actor.target)) {
+        if (actor.location.equals(actor.step)) {
             return STATE.success;
         } else {
             if (angleDeltaEqual(actor.heading, HEADING.up)) {
@@ -185,23 +213,23 @@ class MoveTowardsTarget extends Action {
 }
 
 class SimpleNavigate extends Action {
-    constructor(dest) {
+    constructor() {
         super();
-        this.dest = dest;
     }
 
     tick(actor) {
         actor.path = [];
-        if (this.dest.x !== actor.location.x) {
+        const dest = actor.target.location;
+        if (dest.x !== actor.location.x) {
             actor.path.push({
-                target: new Point(this.dest.x, actor.location.y),
-                heading: this.dest.x > actor.location.x ? HEADING.left : HEADING.right
+                target: new Point(dest.x, actor.location.y),
+                heading: dest.x > actor.location.x ? HEADING.left : HEADING.right
             });
         }
-        if (this.dest.y !== actor.location.y) {
+        if (dest.y !== actor.location.y) {
             actor.path.push({
-                target: new Point(this.dest.x, this.dest.y),
-                heading: this.dest.y < actor.location.y ? HEADING.up : HEADING.down
+                target: new Point(dest.x, dest.y),
+                heading: dest.y < actor.location.y ? HEADING.up : HEADING.down
             });
         }
         return STATE.success;
@@ -216,11 +244,53 @@ class RoutePop extends Action {
     tick(actor) {
         if ("path" in actor && actor.path.length > 0) {
             const step = actor.path.shift();
-            actor.target = step.target;
-            actor.targetHeading = step.heading;
+            actor.step = step.target;
+            actor.stepHeading = step.heading;
             return STATE.success;
         }
         return STATE.failed;
+    }
+}
+
+class PickTarget extends Action {
+    constructor(board) {
+        super();
+        this.board = board;
+    }
+
+    tick(actor) {
+        const best = {
+            target: undefined,
+            dist: Number.MAX_SAFE_INTEGER
+        }
+        const targets = this.board.items.filter(i => i instanceof Target);
+        for (let i = 0; i < targets.length; i += 1) {
+            const dist = actor.location.distance(targets[i].location);
+            if (dist < best.dist) {
+                best.target = targets[i];
+                best.dist = dist;
+            }
+        }
+        if (best.target !== undefined) {
+            actor.target = best.target;
+            return STATE.success;
+        }
+        return STATE.failed;
+    }
+}
+
+class RemoveTarget extends Action {
+    constructor(board) {
+        super();
+        this.board = board;
+    }
+
+    tick(actor) {
+        const idx = this.board.items.indexOf(actor.target);
+        if (idx !== -1) {
+            this.board.items.splice(idx, 1);
+        }
+        delete actor.target;
     }
 }
 
@@ -282,7 +352,6 @@ class Actor {
      * @param {CanvasRenderingContext2D} g
      */
     draw(g) {
-        g.save();
         g.rotate(this.heading);
         g.beginPath();
         g.moveTo(0, -this.size * 1.5)
@@ -294,22 +363,21 @@ class Actor {
         g.lineTo(0, -this.size / 2)
         g.closePath();
         g.fill();
-        g.restore();
     }
 
     tick(board) {
         if (this.bt === undefined) {
-            const target = new Point(Math.floor(Math.random() * board.width), Math.floor(Math.random() * board.height));
-            log(`New target: ${target.x},  ${target.y}`)
             this.bt = new Sequence(
-                new SimpleNavigate(target),
+                new PickTarget(board),
+                new SimpleNavigate(),
                 new UntilFail(
                     new Sequence(
                         new RoutePop(),
                         new TurnToTarget(),
                         new MoveTowardsTarget()
                     )
-                )
+                ),
+                new RemoveTarget(board)
             );
         }
         if (this.bt.tick(this) !== STATE.running) {
@@ -318,14 +386,24 @@ class Actor {
     }
 }
 
+function randomPoint(w, h) {
+    return new Point(
+        Math.floor(Math.random() * (w / 10)) * 10,
+        Math.floor(Math.random() * (h / 10)) * 10
+    )
+}
+
 function init() {
     const canvas = $("#c");
     const b = new Board(canvas);
     b.resize();
 
-    // for (let i = 0; i < 20; i += 1) {
+    for (let i = 0; i < 20; i += 1) {
+        b.add(new Target(randomPoint(b.width, b.height)))
+    }
+
     b.add(new Actor(new Point(200, 200), Math.PI, 1));
-    //  }
+    b.add(new Actor(new Point(400, 200), 0, 1));
 
     function tick() {
         window.requestAnimationFrame(tick);
