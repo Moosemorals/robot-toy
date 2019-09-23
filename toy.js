@@ -110,11 +110,29 @@ class Board {
         this.items.push(item);
     }
 
+    drawGridlines() {
+        const g = this.context;
+        g.strokeStyle = "black"
+        for (let i = -5; i < this.width; i += 10) {
+            g.beginPath();
+            g.moveTo(i, 0);
+            g.lineTo(i, this.height);
+            g.stroke();
+        }
+        for (let i = -5; i < this.height; i += 10) {
+            g.beginPath();
+            g.moveTo(0, i);
+            g.lineTo(this.width, i);
+            g.stroke();
+        }
+    }
+
     /**
      * Draw all the items that the board knows about
      */
     draw() {
         this.context.clearRect(0, 0, this.width, this.height);
+        this.drawGridlines();
         for (let i = 0; i < this.items.length; i += 1) {
             const item = this.items[i];
             this.context.save();
@@ -338,12 +356,11 @@ class Sequence extends Action {
 
 
 class Actor {
-    constructor(p, h, s) {
+    constructor(p, h, plan) {
         this.location = p;
         this.heading = h;
-        this.speed = s;
-        this.scratch = {};
-
+        this.speed = 1;
+        this.plan = plan;
         this.size = 10;
     }
 
@@ -367,18 +384,7 @@ class Actor {
 
     tick(board) {
         if (this.bt === undefined) {
-            this.bt = new Sequence(
-                new PickTarget(board),
-                new SimpleNavigate(),
-                new UntilFail(
-                    new Sequence(
-                        new RoutePop(),
-                        new TurnToTarget(),
-                        new MoveTowardsTarget()
-                    )
-                ),
-                new RemoveTarget(board)
-            );
+            this.bt = this.plan(board)
         }
         if (this.bt.tick(this) !== STATE.running) {
             delete this.bt;
@@ -402,8 +408,21 @@ function init() {
         b.add(new Target(randomPoint(b.width, b.height)))
     }
 
-    b.add(new Actor(new Point(200, 200), Math.PI, 1));
-    b.add(new Actor(new Point(400, 200), 0, 1));
+    const simple = (board) => new Sequence(
+        new PickTarget(board),
+        new SimpleNavigate(),
+        new UntilFail(
+            new Sequence(
+                new RoutePop(),
+                new TurnToTarget(),
+                new MoveTowardsTarget()
+            )
+        ),
+        new RemoveTarget(board)
+    )
+
+    b.add(new Actor(new Point(200, 200), Math.PI, simple));
+    b.add(new Actor(new Point(400, 200), 0, simple));
 
     function tick() {
         window.requestAnimationFrame(tick);
